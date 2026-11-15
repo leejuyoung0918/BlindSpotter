@@ -11,6 +11,25 @@ can we predict whether a blind-zone region will become risky for vulnerable road
 
 Unlike standard object detection, this project does not focus only on already visible pedestrians, cyclists, or e-scooter riders. Instead, we represent blind-zone regions as graph nodes and predict whether a VRU is likely to emerge near those regions in the near future.
 
+## 문제 → 선택 → 결과 → 학습
+
+- **문제**: 이미 보이는 객체만 탐지하는 대신, 가려진 영역 주변에 VRU가 나타나는 위험을 예측하려 했습니다.
+- **선택**: blind-zone을 graph node로 표현하고 단일 프레임 EIGAT·MR-GCN과 시간 정보를 쓰는 ST-GCN을 같은 분할에서 비교했습니다. 불균형 라벨에는 accuracy보다 AUPRC를 우선했습니다.
+- **확인된 결과**: 보존된 비교 결과에서 ST-GCN의 AUPRC는 0.4573, EIGAT는 0.3183, MR-GCN은 0.0147입니다. 모델을 복잡하게 만든다고 개선되는 것은 아니라는 점이 드러납니다. [원본 결과 CSV](outputs/results/three_models_comparison.csv)
+- **학습**: 모델 선택에는 지표·분할 단위·라벨의 의미를 함께 검토해야 합니다. 이 실험의 proxy label은 실제 충돌 위험의 직접 측정값이 아닙니다.
+
+## 개발 환경 개선
+
+기존 shell runner는 데이터 준비·장면 단위 분할·학습·평가 집계를 연결합니다. 이번 정리에서는 분할 알고리즘을 의존성 없는 [src/scene_split.py](src/scene_split.py)로 분리하고, 중복 scene ID·음수/비유한 비율·잘못된 라벨 수를 거부하도록 했습니다. 유효한 기존 입력의 분할 규칙과 seed는 유지했습니다.
+
+[분할 테스트](tests/test_scene_split.py)는 0~29개 장면의 누락·중복 여부, 작은 데이터셋, 재현성, CLI 실패 시 결과 파일을 만들지 않는 동작을 확인합니다.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+이 검사는 GPU·PyTorch·IMPTC 다운로드 없이 실행할 수 있습니다. [CI](.github/workflows/ci.yml)는 이 데이터 분할 계약을 검사하며, 모델 전체 재학습을 수행하는 CI는 아닙니다.
+
 ## Project Overview
 
 The project converts IMPTC trajectory sequences into frame-level scene graphs. Each graph contains traffic agents, reference vehicles, and blind-zone nodes. We then train and compare graph neural network models for blind-zone risk classification.
@@ -349,4 +368,3 @@ large generated output folders
 ```
 
 The full experiment can be reproduced by cloning the GitHub repository and running the commands described above.
-```
