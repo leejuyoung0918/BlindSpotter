@@ -3,28 +3,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
+import sys
 from pathlib import Path
 
 
-def ensure_minimum_nonempty_splits(split: dict[str, list[str]]) -> None:
-    """Keep tiny sample runs trainable while preserving scene-level separation."""
-    if not any(split.values()):
-        return
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-    def move_one(source_keys: list[str], target_key: str) -> bool:
-        for source_key in source_keys:
-            if len(split[source_key]) > 1:
-                split[target_key].append(split[source_key].pop())
-                return True
-        return False
-
-    if not split["train"]:
-        move_one(["val", "test"], "train")
-    if not split["val"]:
-        move_one(["test", "train"], "val")
-    if not split["test"]:
-        move_one(["val", "train"], "test")
+from src.scene_split import split_scenes
 
 
 def main() -> None:
@@ -37,43 +24,22 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
 
-    total_ratio = args.train_ratio + args.val_ratio + args.test_ratio
-    if abs(total_ratio - 1.0) > 1e-6:
-        raise SystemExit("train/val/test ratios must sum to 1.0")
-
-    summary = json.loads(Path(args.summary).read_text(encoding="utf-8"))
-    positive_scenes = [row["scene_id"] for row in summary if int(row["positive_blind_labels"]) > 0]
-    negative_scenes = [row["scene_id"] for row in summary if int(row["positive_blind_labels"]) == 0]
-
-    rng = random.Random(args.seed)
-    rng.shuffle(positive_scenes)
-    rng.shuffle(negative_scenes)
-    split = {"train": [], "val": [], "test": []}
-    for scenes in (positive_scenes, negative_scenes):
-        train_count = max(1, round(len(scenes) * args.train_ratio)) if len(scenes) >= 3 else max(0, len(scenes) - 2)
-        val_count = max(1, round(len(scenes) * args.val_ratio)) if len(scenes) - train_count >= 2 else max(0, len(scenes) - train_count - 1)
-        split["train"].extend(scenes[:train_count])
-        split["val"].extend(scenes[train_count : train_count + val_count])
-        split["test"].extend(scenes[train_count + val_count :])
-
-    ensure_minimum_nonempty_splits(split)
-
-    split = {key: sorted(value) for key, value in split.items()}
-    split["metadata"] = {
-        "seed": args.seed,
-        "train_ratio": args.train_ratio,
-        "val_ratio": args.val_ratio,
-        "test_ratio": args.test_ratio,
-        "positive_scene_count": len(positive_scenes),
-        "negative_scene_count": len(negative_scenes),
-        "split_unit": "scene",
-    }
+    try:
+        summary = json.loads(Path(args.summary).read_text(encoding="utf-8"))
+        if not isinstance(summary, list) or not all(isinstance(row, dict) for row in summary):
+            raise ValueError("summary must be an array of scene records")
+        split = split_scenes(
+            summary, train_ratio=args.train_ratio, val_ratio=args.val_ratio,
+            test_ratio=args.test_ratio, seed=args.seed,
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(split, indent=2), encoding="utf-8")
     print(
         f"[OK] {output}: train={len(split['train'])}, val={len(split['val'])}, test={len(split['test'])}, "
-        f"positive_scenes={len(positive_scenes)}, negative_scenes={len(negative_scenes)}"
+        f"positive_scenes={split['metadata']['positive_scene_count']}, negative_scenes={split['metadata']['negative_scene_count']}"
     )
 
 
